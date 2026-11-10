@@ -1,0 +1,1466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111b2f" media="(prefers-color-scheme: dark)">
+<title>Convoy</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%232563eb'/%3E%3Cpath d='M7 22c5 0 4-9 9-9s4 7 9 7' fill='none' stroke='%23fff' stroke-width='2.4' stroke-linecap='round'/%3E%3Ccircle cx='7' cy='22' r='2.6' fill='%23fff'/%3E%3Ccircle cx='25' cy='20' r='2.6' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css">
+<link rel="stylesheet" href="/static/site.css">
+<script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+<style>
+  html, body { height: 100%; overflow: hidden; }
+
+  /* ---- the frame: bar, map and panel on a wide screen; one view at a time on a phone ---- */
+  .app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+  .bar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top));
+         background: var(--surface); border-bottom: 1px solid var(--border); z-index: 5; }
+  .bar .brand svg { width: 32px; height: 32px; }
+  .ttl { flex: 1; min-width: 0; }
+  .ttlrow { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .lockmark { width: 15px; height: 15px; color: var(--muted); }
+  .ttl h1 { font-size: 17px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .state { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; white-space: nowrap;
+           overflow: hidden; text-overflow: ellipsis; }
+  .state i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .state.ok i { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+  .state.warn i { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+  .state.bad i { background: var(--bad); }
+  .state.bad { color: var(--bad); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .actions { display: flex; gap: 8px; flex: none; }
+  .banner { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 7px 16px; font-size: 13px; font-weight: 600;
+            background: color-mix(in srgb, var(--warn) 16%, var(--surface)); color: var(--warn); border-bottom: 1px solid var(--border); }
+  .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent;
+          animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .stage { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(360px, 32vw, 460px); }
+  .mapwrap { position: relative; min-width: 0; min-height: 0; isolation: isolate; background: var(--surface-2); }
+  #map { position: absolute; inset: 0; background: var(--surface-2); font-family: var(--font); }
+  .panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--bg);
+           border-left: 1px solid var(--border); }
+  .pane { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .app[data-view="chat"] #chatpane, .app[data-view="map"] #chatpane, .app[data-view="cars"] #carspane { display: flex; }
+
+  .ptabs { display: flex; gap: 4px; margin: 12px 14px 0; padding: 4px; background: var(--surface-2); border-radius: 999px; }
+  .ptabs button, .nav button { position: relative; display: flex; align-items: center; justify-content: center; gap: 7px; border: 0;
+        background: transparent; color: var(--muted); font-weight: 600; }
+  .ptabs button { flex: 1; min-height: 36px; border-radius: 999px; }
+  .ptabs button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+  .count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--muted);
+           font-size: 12px; font-weight: 700; line-height: 20px; text-align: center; }
+  .ptabs [aria-selected="true"] .count { background: var(--accent-soft); color: var(--link); }
+  .badge { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--on-accent);
+           font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
+
+  .nav { display: none; background: var(--surface); border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom); }
+  .nav button { flex: 1; flex-direction: column; gap: 2px; padding: 8px 4px 7px; font-size: 12px; }
+  .nav button[aria-selected="true"] { color: var(--link); }
+  .nav .badge { position: absolute; top: 4px; left: calc(50% + 6px); }
+  .nav .count { position: absolute; top: 4px; left: calc(50% + 6px); }
+
+  @media (max-width: 859px) {
+    .stage { display: block; position: relative; }
+    .mapwrap, .panel { position: absolute; inset: 0; }
+    .panel { border-left: 0; }
+    .app[data-view="map"] .panel { display: none; }
+    .app:not([data-view="map"]) .mapwrap { display: none; }
+    .ptabs { display: none; }
+    .nav { display: flex; }
+    .bar .btn .lbl { display: none; }
+    .bar .btn.ghost { width: 40px; padding: 0; }
+  }
+
+  /* ---- map ---- */
+  .maplibregl-map { font-family: var(--font); }
+  .maplibregl-ctrl-group { border-radius: 12px !important; overflow: hidden; box-shadow: var(--shadow) !important; background: var(--surface) !important; }
+  .maplibregl-ctrl-group button { width: 38px; height: 38px; }
+  .maplibregl-ctrl-group button + button { border-top: 1px solid var(--border) !important; }
+  .maplibregl-ctrl-group button:hover { background: var(--surface-2) !important; }
+  .maplibregl-ctrl-attrib { background: color-mix(in srgb, var(--surface) 80%, transparent) !important; color: var(--muted) !important; font-size: 10px; }
+  .maplibregl-ctrl-attrib a { color: var(--muted) !important; }
+  @media (prefers-color-scheme: dark) {
+    .maplibregl-ctrl-icon, .maplibregl-ctrl-attrib-button { filter: invert(1); }
+  }
+  .maptools { position: absolute; right: 10px; bottom: 136px; z-index: 600; display: grid; gap: 8px; }
+  .maptools button { width: 38px; height: 38px; border: 0; border-radius: 12px; background: var(--surface); color: var(--text);
+                     box-shadow: var(--shadow); display: grid; place-items: center; }
+  .maptools button:hover { background: var(--surface-2); }
+  .mapinfo { position: absolute; left: 10px; top: 10px; z-index: 600; padding: 7px 12px; border-radius: 999px; background: var(--surface);
+             box-shadow: var(--shadow); font-size: 13px; font-weight: 600; max-width: calc(100% - 20px); }
+  .mapinfo span { color: var(--muted); font-weight: 500; }
+  .mapfail { position: absolute; inset: 0; z-index: 400; display: grid; place-items: start center; text-align: center; padding: 64px 24px 24px;
+             color: var(--muted); pointer-events: none; }
+
+  .pin { position: relative; width: 56px; height: 56px; --c: #2563eb; --ci: #fff; }
+  .pin .disc { position: absolute; inset: 8px; border-radius: 50%; background: var(--c); color: var(--ci); border: 3px solid #fff;
+               box-shadow: 0 2px 8px rgba(0, 0, 0, .4); overflow: hidden; display: grid; place-items: center; font-weight: 700;
+               font-size: 14px; }
+  .pin .disc img { width: 100%; height: 100%; object-fit: cover; }
+  .pin .disc img.cp { width: 74%; height: 74%; object-fit: contain; }
+  /* a car picture stands alone, turned to its heading (stylePin), with a faint light edge and a shadow to read on the dark map */
+  .pin .disc.pic { inset: 0; border: 0; border-radius: 0; background: none; box-shadow: none; overflow: visible; }
+  .pin .disc.pic img.cp { width: 22px; height: 44px; filter: drop-shadow(0 0 1px rgba(255, 255, 255, .6)) drop-shadow(0 1px 2px rgba(0, 0, 0, .65)); }
+  .pin .head { position: absolute; inset: 0; pointer-events: none; }
+  .pin .head::before { content: ""; position: absolute; left: 50%; top: 0; margin-left: -7px; border: 7px solid transparent;
+                       border-bottom: 11px solid var(--c); border-top: 0; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .35)); }
+  .pin.still .head, .pin.carpic .head, .pin.off .head { display: none; }
+  .pin.off { opacity: .55; filter: grayscale(.55); }
+  .pin-wrap { width: 56px; height: 56px; cursor: pointer; }
+  .pin-wrap .car-label { position: absolute; left: 50%; top: 52px; transform: translateX(-50%); white-space: nowrap; }
+  .car-label { display: flex; align-items: center; gap: 6px; background: var(--surface); color: var(--text); border: 1px solid var(--border);
+               border-radius: 999px; padding: 2px 10px 2px 7px; font-weight: 600; font-size: 12px; box-shadow: var(--shadow-sm); }
+  .car-label i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+
+  /* ---- avatars: the car seen from above, on its own (its colour is in the name, the dot or the card's edge); a round
+     initials badge on the member's colour only when there is no car picture ---- */
+  .avw { position: relative; flex: none; }
+  .av { --s: 36px; --ph: 46px; width: var(--s); height: var(--s); border-radius: 50%; background: var(--c, #64748b); color: var(--ci, #fff);
+        display: grid; place-items: center; overflow: hidden; font-weight: 700; font-size: calc(var(--s) * .38); letter-spacing: .02em;
+        flex: none; user-select: none; }
+  .av.xs { --s: 26px; --ph: 34px; }
+  .av.sm { --s: 30px; --ph: 40px; }
+  .av.lg { --s: 48px; --ph: 56px; }
+  .av.pic { height: var(--ph); border-radius: 0; background: none; overflow: visible; }
+  .av img.cp { height: var(--ph); width: calc(var(--ph) / 2); object-fit: contain; display: block;
+               filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, .5)); }
+  .presence { position: absolute; right: -1px; bottom: -1px; width: 13px; height: 13px; border-radius: 50%; background: var(--muted);
+              border: 2.5px solid var(--surface); }
+  .presence.on { background: var(--ok); }
+  .av.pic + .presence { right: 7px; }                /* by the car, not the corner of its box */
+
+  /* ---- chat ---- */
+  .chead { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px 8px; }
+  .chead h2 { font-size: 15px; font-weight: 700; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
+  .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .switch .tr { width: 34px; height: 20px; border-radius: 999px; background: var(--border); position: relative; transition: background .15s; flex: none; }
+  .switch .tr::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff;
+                       box-shadow: 0 1px 2px rgba(0, 0, 0, .3); transition: transform .15s; }
+  .switch input:checked + .tr { background: var(--accent); }
+  .switch input:checked + .tr::after { transform: translateX(14px); }
+  .switch input:focus-visible + .tr { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .msgwrap { position: relative; flex: 1; min-height: 0; display: flex; }
+  .threads { flex: none; display: flex; gap: 6px; padding: 2px 14px 8px; overflow-x: auto; scrollbar-width: none; }
+  .threads::-webkit-scrollbar { display: none; }
+  .chip { flex: none; display: inline-flex; align-items: center; gap: 7px; min-height: 34px; max-width: 200px; padding: 0 12px 0 4px;
+          border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 600; }
+  .chip.all { padding-left: 12px; }
+  .chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--link); }
+  .chip .badge { margin-right: -4px; }
+  .privnote { flex: none; display: flex; align-items: center; gap: 7px; margin: 0 14px 4px; padding: 5px 12px; border-radius: 999px; font-size: 12px;
+              font-weight: 600; color: var(--link); background: var(--accent-soft); }
+  .privnote .ic { width: 14px; height: 14px; }
+  .msgs.priv { background: color-mix(in srgb, var(--accent) 5%, transparent); border-top: 1px dashed color-mix(in srgb, var(--accent) 35%, var(--border)); }
+  .row.priv.other .bubble { border-style: dashed; border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+                            background: color-mix(in srgb, var(--accent) 7%, var(--bubble-in)); }
+  .foot .lockm { width: 11px; height: 11px; opacity: .8; }
+  .msgs { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 4px 14px 12px; display: flex; flex-direction: column; }
+  .empty { margin: auto; text-align: center; color: var(--muted); padding: 24px; max-width: 280px; }
+  .empty .ic { width: 34px; height: 34px; margin-bottom: 8px; opacity: .6; }
+  .empty b { display: block; color: var(--text); margin-bottom: 2px; }
+  .day { align-self: center; margin: 16px 0 8px; padding: 3px 12px; border-radius: 999px; background: var(--surface-2); color: var(--muted);
+         font-size: 12px; font-weight: 600; }
+  .row { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; }
+  .row.cont { margin-top: 2px; }
+  .row.mine { justify-content: flex-end; }
+  .slot { width: 30px; flex: none; }
+  .col { display: flex; flex-direction: column; min-width: 0; max-width: min(82%, 460px); }
+  .row.mine .col { align-items: flex-end; }
+  .who { font-size: 12px; font-weight: 700; margin: 0 0 3px 4px; color: var(--muted); color: color-mix(in srgb, var(--c) 62%, var(--text)); }
+  .bubble { padding: 8px 12px 6px; border-radius: 18px; background: var(--bubble-in); border: 1px solid var(--border);
+            box-shadow: var(--shadow-sm); overflow-wrap: anywhere; min-width: 0; }
+  .row.mine .bubble { background: var(--bubble-out); color: var(--bubble-out-text); border-color: transparent; }
+  .row.other:not(.more) .bubble { border-bottom-left-radius: 6px; }
+  .row.other.cont .bubble { border-top-left-radius: 6px; }
+  .row.other.more .bubble { border-bottom-left-radius: 6px; }
+  .row.mine:not(.more) .bubble { border-bottom-right-radius: 6px; }
+  .row.mine.cont .bubble { border-top-right-radius: 6px; }
+  .row.mine.more .bubble { border-bottom-right-radius: 6px; }
+  .row.pending .bubble { opacity: .72; }
+  .row.failed .bubble { background: var(--bad-soft); color: var(--bad); border: 1px solid var(--bad); cursor: pointer; }
+  .text { white-space: pre-wrap; }
+  .text a { color: inherit; text-decoration: underline; }
+  .foot { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 2px; font-size: 11px; opacity: .75;
+          font-variant-numeric: tabular-nums; }
+  .foot .ic { width: 12px; height: 12px; stroke-width: 2.2; }
+  .tag { display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 999px; background: rgba(128, 128, 128, .18);
+         font-weight: 600; font-size: 11px; }
+  .tag.late { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); opacity: 1; }
+  .row.mine .tag.late { background: rgba(255, 255, 255, .22); color: inherit; }
+
+  .voice { display: flex; align-items: center; gap: 10px; width: 232px; max-width: 100%; padding: 2px 0; }
+  .voice .play { width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent);
+                 display: grid; place-items: center; flex: none; }
+  .voice .play .ic { width: 18px; height: 18px; fill: currentColor; stroke: none; }
+  .voice .play .i-pause { display: none; }
+  .voice.playing .play .i-play { display: none; }
+  .voice.playing .play .i-pause { display: block; }
+  .row.mine .voice .play { background: #fff; color: var(--bubble-out); }
+  .voice .mid { flex: 1; min-width: 0; }
+  .voice .dur { font-size: 12px; opacity: .8; font-variant-numeric: tabular-nums; margin-top: 1px; }
+  .voice.gone { opacity: .6; }
+  .voice input[type=range] { -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 18px; margin: 0; background: transparent;
+                             cursor: pointer; --p: 0%; }
+  .voice input[type=range]::-webkit-slider-runnable-track { height: 5px; border-radius: 999px;
+        background: linear-gradient(to right, var(--accent) var(--p), color-mix(in srgb, currentColor 22%, transparent) var(--p)); }
+  .voice input[type=range]::-moz-range-track { height: 5px; border-radius: 999px;
+        background: color-mix(in srgb, currentColor 22%, transparent); }
+  .voice input[type=range]::-moz-range-progress { height: 5px; border-radius: 999px; background: var(--accent); }
+  .voice input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; margin-top: -4px; border-radius: 50%;
+        background: var(--accent); border: 2px solid var(--bubble-in); box-shadow: 0 1px 2px rgba(0, 0, 0, .3); }
+  .voice input[type=range]::-moz-range-thumb { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bubble-in); }
+  .row.mine .voice input[type=range] { --accent: #fff; }
+  .row.mine .voice input[type=range]::-webkit-slider-thumb, .row.mine .voice input[type=range]::-moz-range-thumb { border-color: var(--bubble-out); }
+
+  .pill { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px;
+          padding: 7px 14px; border: 0; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 13px;
+          box-shadow: var(--shadow); }
+  .np { display: flex; align-items: center; gap: 10px; margin: 0 14px 8px; padding: 8px 8px 8px 14px; border-radius: 999px; background: var(--surface);
+        border: 1px solid var(--border); box-shadow: var(--shadow-sm); font-size: 13px; }
+  .np .eq { display: flex; align-items: flex-end; gap: 2px; height: 14px; color: var(--link); flex: none; }
+  .np .eq i { width: 3px; background: currentColor; border-radius: 2px; height: 40%; }
+  .np.live .eq i { animation: eq 0.9s ease-in-out infinite; }
+  .np.live .eq i:nth-child(2) { animation-delay: .2s; }
+  .np.live .eq i:nth-child(3) { animation-delay: .4s; }
+  @keyframes eq { 50% { height: 100%; } }
+  .np .what { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np .what span { color: var(--muted); }
+  .np .btn { min-height: 30px; padding: 0 12px; font-size: 13px; }
+
+  .composer { display: flex; align-items: flex-end; gap: 8px; padding: 10px 14px; padding-bottom: max(10px, env(safe-area-inset-bottom));
+              background: var(--surface); border-top: 1px solid var(--border); }
+  .composer textarea { flex: 1; min-width: 0; resize: none; max-height: 120px; min-height: 42px; padding: 10px 14px; border-radius: 21px;
+        border: 1px solid var(--border); background: var(--bg); font-size: 16px; line-height: 1.35; display: block; overflow-y: hidden; }
+  .composer textarea:focus { outline: 0; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+  .composer .btn { width: 42px; min-height: 42px; height: 42px; padding: 0; }
+  .composer .btn .ic { width: 20px; height: 20px; }
+  @media (max-width: 859px) { .composer { padding-bottom: 10px; } }
+
+  /* ---- cars ---- */
+  .summary { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 14px 6px; }
+  .stat { flex: 1; min-width: 96px; padding: 10px 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); }
+  .stat b { display: block; font-size: 20px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .carlist { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 14px 16px; }
+  .carlist h3 { margin: 14px 4px 6px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .carlist ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  .car { --c: #64748b; display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border-radius: 14px; background: var(--surface);
+         border: 1px solid var(--border); box-shadow: inset 4px 0 0 var(--c), var(--shadow-sm); cursor: pointer; transition: transform .1s; }
+  .car:hover { border-color: color-mix(in srgb, var(--c) 45%, var(--border)); }
+  .car.off .av { filter: grayscale(.7); opacity: .75; }
+  .car.flash { animation: flash 1.2s; }
+  @keyframes flash { 30% { background: var(--accent-soft); } }
+  .cinfo { flex: 1; min-width: 0; }
+  .cname { font-weight: 650; display: flex; align-items: center; gap: 6px; }
+  .cname > b { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cline { color: var(--muted); font-size: 13px; }
+  .cline.on { color: var(--ok); }
+  .facts { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 5px; font-size: 12.5px; color: var(--text); font-variant-numeric: tabular-nums; }
+  .fact { display: inline-flex; align-items: center; gap: 4px; }
+  .fact .ic { width: 14px; height: 14px; color: var(--muted); }
+  .loc { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--surface-2); color: var(--muted); display: grid; place-items: center;
+         flex: none; }
+  .loc:hover { color: var(--link); background: var(--accent-soft); }
+  .loc.msgbtn { position: relative; color: var(--link); background: var(--accent-soft); }
+  .loc.msgbtn:hover { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); }
+  .loc.msgbtn .badge { position: absolute; top: -4px; right: -4px; }
+  .btn.sm { min-height: 32px; padding: 0 14px; font-size: 13px; }
+  .maplibregl-popup-content { background: var(--surface) !important; color: var(--text); border-radius: 14px !important; box-shadow: var(--shadow) !important;
+                              padding: 10px 12px !important; }
+  .maplibregl-popup-anchor-top .maplibregl-popup-tip, .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: var(--surface); }
+  .maplibregl-popup-anchor-bottom .maplibregl-popup-tip, .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+  .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: var(--surface); }
+  .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--surface); }
+  .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--surface); }
+  .pop { display: flex; align-items: center; gap: 12px; font-family: var(--font); font-size: 14px; }
+
+  /* ---- sheets: share, settings, password, ended ---- */
+  .modal { position: fixed; inset: 0; z-index: 2000; background: var(--scrim); display: flex; align-items: center; justify-content: center;
+           padding: 16px; backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); animation: fade .15s; }
+  @keyframes fade { from { opacity: 0; } }
+  .sheet { width: 100%; max-width: 400px; max-height: 100%; overflow-y: auto; padding: 24px; text-align: center; box-shadow: var(--shadow-lg);
+           animation: rise .2s; }
+  @keyframes rise { from { transform: translateY(14px); opacity: 0; } }
+  .sheet h2 { font-size: 20px; letter-spacing: -.01em; margin-bottom: 6px; }
+  .sheet p { color: var(--muted); font-size: 14px; margin-bottom: 16px; }
+  .sheet .field { text-align: left; margin-bottom: 14px; }
+  .sheet .btn + .btn { margin-top: 8px; }
+  .qr { display: block; width: 100%; max-width: 240px; aspect-ratio: 1; margin: 6px auto 16px; background: #fff; border-radius: 14px; padding: 10px;
+        border: 1px solid var(--border); }
+  .linkrow { display: flex; gap: 8px; margin-bottom: 8px; }
+  .linkrow input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg);
+                   font-size: 14px; }
+  .sheet .lockicon { width: 52px; height: 52px; margin: 0 auto 12px; border-radius: 16px; background: var(--accent-soft); color: var(--link);
+                     display: grid; place-items: center; }
+  .sheet .lockicon .ic { width: 26px; height: 26px; }
+  .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 1500; max-width: min(92vw, 420px); padding: 10px 16px;
+           border-radius: 14px; background: var(--text); color: var(--bg); font-size: 14px; box-shadow: var(--shadow-lg); cursor: pointer;
+           animation: rise .2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.6A8 8 0 1 1 21 12z"/></symbol>
+  <symbol id="i-cars" viewBox="0 0 24 24"><path d="M5 16.5V12l1.6-4.2A2 2 0 0 1 8.5 6.5h7a2 2 0 0 1 1.9 1.3L19 12v4.5"/><path d="M4 12h16v4.5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z"/><circle cx="8" cy="14.5" r=".6"/><circle cx="16" cy="14.5" r=".6"/><path d="M6.5 17.5V19M17.5 17.5V19"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V4m0 0L8 8m4-4 4 4"/><path d="M5 12v6.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V12"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M5 12h13m0 0-5-5m5 5-5 5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.2v13.6a1 1 0 0 0 1.5.86l11-6.8a1 1 0 0 0 0-1.72l-11-6.8A1 1 0 0 0 8 5.2z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></symbol>
+  <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/><circle cx="12" cy="12" r="7.5"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/><circle cx="12" cy="12" r="2.2"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14m0 0-5-5m5 5 5-5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/></symbol>
+  <symbol id="i-speed" viewBox="0 0 24 24"><path d="M4.5 18a8.5 8.5 0 1 1 15 0"/><path d="M12 14l4-5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 20V5m0 0-5.5 5.5M12 5l5.5 5.5"/></symbol>
+  <symbol id="i-dist" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><circle cx="12" cy="12" r="8" stroke-dasharray="2.5 3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4m0 0h11l-2 4 2 4H5"/></symbol>
+</svg>
+
+<div class="app" id="app" data-view="chat">
+  <header class="bar">
+    <a class="brand" href="/" title="About Convoy" aria-label="Convoy home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="9" fill="var(--accent)"/><path d="M7 22c5 0 4-9 9-9s4 7 9 7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="7" cy="22" r="2.6" fill="#fff"/><circle cx="25" cy="20" r="2.6" fill="#fff"/></svg>
+    </a>
+    <div class="ttl">
+      <div class="ttlrow"><h1 id="title">Convoy</h1><svg class="ic lockmark" id="lockmark" hidden role="img" aria-label="Password protected"><title>Password protected</title><use href="#i-lock"/></svg></div>
+      <div class="state warn" id="status"><i></i><span id="statustext">Connecting…</span></div>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="shareBtn" type="button" hidden><svg class="ic"><use href="#i-share"/></svg><span class="lbl">Share</span></button>
+      <button class="btn ghost icon" id="setBtn" type="button" aria-label="Settings"><svg class="ic"><use href="#i-gear"/></svg></button>
+    </div>
+  </header>
+  <div class="banner" id="banner" hidden><span class="spin"></span><span id="bannertext">Connection lost. Trying again…</span></div>
+
+  <main class="stage">
+    <section class="mapwrap" id="mapwrap" aria-label="Map">
+      <div id="map"></div>
+      <div class="mapinfo" id="mapinfo" hidden></div>
+      <div class="maptools"><button type="button" id="fitBtn" aria-label="Show all cars" title="Show all cars"><svg class="ic"><use href="#i-fit"/></svg></button></div>
+      <div class="mapfail" id="mapfail" hidden>The map could not be loaded (it needs a connection to the internet). Messages and the list of cars still work.</div>
+    </section>
+
+    <section class="panel" id="panel">
+      <div class="ptabs" role="tablist">
+        <button type="button" role="tab" data-go="chat"><svg class="ic"><use href="#i-chat"/></svg>Chat <span class="badge" data-unread hidden></span></button>
+        <button type="button" role="tab" data-go="cars"><svg class="ic"><use href="#i-cars"/></svg>Cars <span class="count" data-count>0</span></button>
+      </div>
+
+      <div class="pane" id="chatpane">
+        <div class="chead">
+          <h2>Messages</h2>
+          <label class="switch"><input type="checkbox" id="autoplay"><span class="tr"></span>Autoplay voice notes</label>
+        </div>
+        <div class="threads" id="threads" role="tablist" aria-label="Conversations" hidden></div>
+        <div class="privnote" id="privnote" hidden><svg class="ic"><use href="#i-lock"/></svg><span id="privnotetext"></span></div>
+        <div class="msgwrap" id="msgwrap">
+          <button class="pill" id="pill" type="button" hidden><svg class="ic" style="width:16px;height:16px"><use href="#i-down"/></svg><span id="pilltext">New messages</span></button>
+        </div>
+        <div class="np" id="np" hidden>
+          <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="what" id="npwhat"></span>
+          <button class="btn ghost" id="npskip" type="button">Skip</button>
+        </div>
+        <form class="composer" id="send" autocomplete="off">
+          <label class="sr" for="text" id="textlabel">Message the drivers</label>
+          <textarea id="text" rows="1" maxlength="500" placeholder="Message the drivers" enterkeyhint="send" disabled></textarea>
+          <button class="btn" id="go" aria-label="Send" disabled><svg class="ic"><use href="#i-send"/></svg></button>
+        </form>
+      </div>
+
+      <div class="pane" id="carspane">
+        <div class="summary" id="summary"></div>
+        <div class="carlist" id="carlist"></div>
+      </div>
+    </section>
+  </main>
+
+  <nav class="nav" role="tablist" aria-label="Views">
+    <button type="button" role="tab" data-go="map"><svg class="ic"><use href="#i-map"/></svg>Map</button>
+    <button type="button" role="tab" data-go="chat"><svg class="ic"><use href="#i-chat"/></svg>Chat<span class="badge" data-unread hidden></span></button>
+    <button type="button" role="tab" data-go="cars"><svg class="ic"><use href="#i-cars"/></svg>Cars<span class="count" data-count>0</span></button>
+  </nav>
+</div>
+
+<!-- the convoy's password -->
+<div class="modal" id="gate" hidden>
+  <form class="card sheet" id="pwform">
+    <div class="lockicon"><svg class="ic"><use href="#i-lock"/></svg></div>
+    <h2>This convoy has a password</h2>
+    <p>Ask whoever started it. You need it as well as the link.</p>
+    <label class="field"><span>Password</span><input id="pw" type="password" autocomplete="current-password"></label>
+    <div class="error" id="pwerror" role="alert"></div>
+    <button class="btn big block" id="pwgo">Join</button>
+  </form>
+</div>
+
+<!-- share: link and QR code, and ending it -->
+<div class="modal" id="share" hidden>
+  <div class="card sheet" role="dialog" aria-labelledby="sharetitle">
+    <h2 id="sharetitle">Join the convoy</h2>
+    <p id="sharenote">Scan the code with the car's phone (Convoy, Scan to join), or send the link.</p>
+    <img class="qr" id="qr" alt="QR code of the convoy's link">
+    <div class="linkrow"><input id="link" readonly aria-label="The convoy's link"><button class="btn" type="button" id="copy">Copy</button></div>
+    <button class="btn ghost block" type="button" id="nativeShare" hidden>Share the link…</button>
+    <button class="btn quiet block" type="button" id="close">Close</button>
+    <div id="endbox" hidden><button class="btn danger block" type="button" id="end">End the convoy for everyone</button></div>
+  </div>
+</div>
+
+<!-- your name -->
+<div class="modal" id="settings" hidden>
+  <form class="card sheet" id="setform" role="dialog" aria-labelledby="settitle">
+    <h2 id="settitle">You in the convoy</h2>
+    <p>The name the cars see on your messages.</p>
+    <label class="field"><span>Your name</span><input id="me" maxlength="40" autocomplete="off"></label>
+    <button class="btn block" type="submit">Save</button>
+    <button class="btn quiet block" type="button" data-close="settings">Cancel</button>
+  </form>
+</div>
+
+<!-- ended, or not there -->
+<div class="modal" id="ended" hidden>
+  <div class="card sheet">
+    <div class="lockicon"><svg class="ic"><use href="#i-flag"/></svg></div>
+    <h2 id="endedtitle">This convoy has ended</h2>
+    <p id="endedtext"></p>
+    <a class="btn big block" href="/">About Convoy</a>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const token = location.pathname.replace(/\/$/, "").split("/").pop();
+
+  // ---- storage: the member id, name, autoplay (here for good), the password (this tab) and the starter's key ----
+  let store = {};
+  try { store = window.localStorage; } catch (e) { store = {}; }
+  const get = (k) => { try { return store.getItem ? store.getItem(k) : null; } catch (e) { return null; } };
+  const put = (k, v) => { try { if (store.setItem) store.setItem(k, v); } catch (e) {} };
+  // the id is the watcher's private threads: it must stay the same across reloads (this tab's storage if the browser keeps none)
+  let me = get("member");
+  if (!me) { try { me = sessionStorage.getItem("member"); } catch (e) {} }
+  if (!me) me = "web-" + Math.random().toString(36).slice(2, 12).padEnd(6, "0");
+  put("member", me);
+  try { sessionStorage.setItem("member", me); } catch (e) {}
+  // no prompt(): a dialog would stop the page until answered; the name is a field in the settings instead
+  let myName = get("name") || "Watching";
+  const pw = () => { try { return sessionStorage.getItem("pw:" + token) || ""; } catch (e) { return ""; } };
+  const setPw = (v) => { try { sessionStorage.setItem("pw:" + token, v); } catch (e) {} };
+  const key = () => { try { return localStorage.getItem("key:" + token) || ""; } catch (e) { return ""; } };
+
+  // ---- small helpers ----
+  function el(tag, cls, kids) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    (kids || []).forEach((k) => { if (k != null) e.append(k); });
+    return e;
+  }
+  function icon(name, cls) {
+    const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    s.setAttribute("class", "ic" + (cls ? " " + cls : ""));
+    const u = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    u.setAttribute("href", "#i-" + name);
+    s.appendChild(u);
+    return s;
+  }
+  const pad = (n) => (n < 10 ? "0" : "") + n;
+  function fmtTime(t) { return new Date(t).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}); }
+  function dayKey(t) { const d = new Date(t); return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate(); }
+  function dayLabel(t) {
+    const d = new Date(t), now = new Date();
+    if (dayKey(t) === dayKey(now.getTime())) return "Today";
+    if (dayKey(t) === dayKey(now.getTime() - 86400000)) return "Yesterday";
+    return d.toLocaleDateString([], {weekday: "long", day: "numeric", month: "long"});
+  }
+  function ago(t) {
+    const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (s < 10) return "just now";
+    if (s < 60) return s + " s ago";
+    if (s < 3600) return Math.round(s / 60) + " min ago";
+    if (s < 86400) return Math.round(s / 3600) + " h ago";
+    return Math.round(s / 86400) + " d ago";
+  }
+  function waited(s) { return s < 90 ? s + " s" : s < 5400 ? Math.round(s / 60) + " min" : Math.round(s / 3600) + " h"; }
+  function fmtDur(s) { s = Math.max(0, Math.round(s)); return Math.floor(s / 60) + ":" + pad(s % 60); }
+  function fmtDist(m) { return m < 950 ? Math.round(m / 10) * 10 + " m" : (m / 1000).toFixed(m < 9950 ? 1 : 0) + " km"; }
+  function distance(a, b) {
+    const R = 6371000, rad = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  const compass = (b) => COMPASS[Math.round((((b % 360) + 360) % 360) / 45) % 8];
+
+  // ---- colours: a car's own, else one that tells it from the others ----
+  const PALETTE = ["#2f7bff", "#e4572e", "#17a398", "#f2a900", "#8a5cff", "#e83e8c", "#1fb866", "#00a6d6", "#c2410c", "#6d7b91"];
+  const SOFT = ["#64748b", "#7c8aa5", "#8b7fb5", "#6b9a8f", "#a08670"];
+  function validColour(c) { const m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(c || ""); return m ? "#" + m[1].toLowerCase() : null; }
+  function hash(s) { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); }
+  function ink(hex) {
+    const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+    return 0.299 * r + 0.587 * g + 0.114 * b > 160 ? "#10203a" : "#ffffff";
+  }
+  function initials(name) {
+    const w = String(name || "?").split(/\s+/).map((x) => (/[\p{L}\p{N}]/u.exec(x) || [""])[0]).filter(Boolean);
+    return ((w[0] || "?") + (w.length > 1 ? w[w.length - 1] : "")).toUpperCase();
+  }
+  const members = new Map();
+  function assignColours() {
+    const used = new Set();
+    members.forEach((m) => {
+      if (m.role === "watcher") { m.c = SOFT[hash(m.id) % SOFT.length]; m.ci = "#ffffff"; return; }
+      let c = validColour(m.colour);
+      if (!c || used.has(c)) c = PALETTE.find((p) => !used.has(p)) || ("#" + (hash(m.id) & 0xffffff).toString(16).padStart(6, "0"));
+      used.add(c);
+      m.c = c;
+      m.ci = ink(c);
+    });
+  }
+  const safeCar = (c) => typeof c === "string" && c.length > 20 && /^[A-Za-z0-9+/=]+$/.test(c);
+
+  // the member behind a message, or a stand-in when the server no longer has it
+  function who(id, name) {
+    return members.get(id) || {id: id, name: name || "?", role: "vehicle", c: SOFT[hash(String(id)) % SOFT.length], ci: "#ffffff"};
+  }
+  function fillAvatar(a, m) {
+    a.textContent = "";
+    a.classList.toggle("pic", safeCar(m.car));
+    if (safeCar(m.car)) {
+      const img = new Image();
+      img.className = "cp";
+      img.alt = "";
+      img.src = "data:image/png;base64," + m.car;
+      a.append(img);
+    } else {
+      a.textContent = initials(m.name);
+    }
+  }
+  function avatar(m, size) {
+    const a = el("span", "av" + (size ? " " + size : ""));
+    a.style.setProperty("--c", m.c);
+    a.style.setProperty("--ci", m.ci);
+    fillAvatar(a, m);
+    return a;
+  }
+
+  // ---- views: map / chat / cars on a phone, the map beside chat or cars on a wide screen ----
+  const app = $("app"), wide = window.matchMedia("(min-width: 860px)");
+  let view = wide.matches ? "chat" : "map";
+  const chatVisible = () => !document.hidden && (view === "chat" || (wide.matches && view !== "cars"));
+  const mapVisible = () => wide.matches || view === "map";
+  function setView(v) {
+    view = v;
+    app.dataset.view = v;
+    const shown = wide.matches && v === "map" ? "chat" : v;
+    document.querySelectorAll("[data-go]").forEach((b) => b.setAttribute("aria-selected", b.dataset.go === shown ? "true" : "false"));
+    if (mapVisible() && map) { map.resize(); if (pendingFit) fit(); }
+    if (v === "cars" || (wide.matches && v !== "chat")) renderCars();
+    if (chatVisible()) { clearUnread(); toBottom(); }
+  }
+  document.querySelectorAll("[data-go]").forEach((b) => { b.onclick = () => setView(b.dataset.go); });
+  wide.addEventListener ? wide.addEventListener("change", () => setView(view)) : wide.addListener(() => setView(view));
+
+  // ---- the map ----
+  let map = null, touched = false, pendingFit = false, fitTimer = null, fitted = false;
+  const markers = new Map();
+  const dark = window.matchMedia("(prefers-color-scheme: dark)");
+  const mapStyle = () => "/static/map-" + (dark.matches ? "dark" : "light") + ".json";
+  if (typeof maplibregl !== "undefined") {
+    try {
+      map = new maplibregl.Map({container: "map", style: mapStyle(), center: [22.46, -33.96], zoom: 11, maxZoom: 19,
+                                attributionControl: {compact: true}, dragRotate: false, pitchWithRotate: false, maxPitch: 0});
+      map.touchZoomRotate.disableRotation();      map.addControl(new maplibregl.NavigationControl({showCompass: false}), "bottom-right");
+      // the style follows the browser's light or dark setting, live
+      const restyle = () => map.setStyle(mapStyle());
+      dark.addEventListener ? dark.addEventListener("change", restyle) : dark.addListener(restyle);
+      // until someone moves the map itself, it keeps every car in view
+      ["pointerdown", "wheel", "touchstart", "keydown"].forEach((ev) => {
+        map.getContainer().addEventListener(ev, () => { touched = true; }, {passive: true});
+      });
+      // tiles or style that will not load: say so, and clear the notice once a load goes through
+      let broken = false;
+      map.on("error", () => { broken = true; $("mapfail").hidden = false; });
+      map.on("idle", () => { if (!broken) $("mapfail").hidden = true; broken = false; });
+    } catch (e) {                           // no WebGL
+      map = null;
+    }
+  }
+  if (!map) {
+    $("mapfail").hidden = false;
+    $("fitBtn").hidden = true;
+  }
+
+  function pinKey(m) {
+    return [m.c, safeCar(m.car) ? m.car.length : 0, initials(m.name)].join("|");
+  }
+  function pinIcon(m) {
+    const pin = el("div", "pin");
+    pin.style.setProperty("--c", m.c);
+    pin.style.setProperty("--ci", m.ci);
+    const disc = el("div", "disc");
+    fillAvatar(disc, m);
+    pin.append(el("div", "head"), disc);
+    return el("div", "pin-wrap", [pin, labelEl(m)]);       // the car with its name pill under it
+  }
+  function labelEl(m) {
+    const i = el("i");
+    i.style.background = m.c;
+    return el("span", "car-label", [i, m.name]);
+  }
+  function popupEl(m) {                    // tapping a car on the map: its name and a way to message it privately
+    const b = el("button", "btn sm", [icon("chat"), "Message"]);
+    b.type = "button";
+    b.onclick = () => { const mk = markers.get(m.id); if (mk) mk.getPopup().remove(); openThread(m.id); };
+    return el("div", "pop", [el("b", "", [m.name]), b]);
+  }
+  function stylePin(mk, m) {
+    const root = mk.getElement();
+    if (!root) return;
+    const pin = root.firstChild;
+    if (!pin) return;
+    const b = (m.pos && m.pos.bearing) || 0, moving = m.pos && m.pos.speed > 1;
+    const car = pin.querySelector("img.cp");
+    pin.classList.toggle("off", !m.online);
+    pin.classList.toggle("still", !moving);
+    pin.classList.toggle("carpic", !!car);
+    const head = pin.querySelector(".head");
+    if (head) head.style.transform = "rotate(" + b + "deg)";
+    if (car) car.style.transform = "rotate(" + b + "deg)";
+  }
+  function scheduleFit() {
+    if (touched || fitTimer) return;
+    fitTimer = setTimeout(() => { fitTimer = null; if (!touched) fit(); }, 300);
+  }
+  function place(m, quiet) {
+    if (!map || !m.pos || m.role === "watcher") return;
+    const at = [m.pos.lon, m.pos.lat];
+    let mk = markers.get(m.id);
+    const k = pinKey(m);
+    if (!mk) {
+      const pop = new maplibregl.Popup({closeButton: false, offset: [0, -24], maxWidth: "none"}).setDOMContent(popupEl(m));
+      mk = new maplibregl.Marker({element: pinIcon(m), anchor: "center"}).setLngLat(at).setPopup(pop).addTo(map);
+      mk.getElement().setAttribute("aria-label", m.name);
+      mk._key = k;
+      markers.set(m.id, mk);
+    } else {
+      mk.setLngLat(at);
+      if (mk._key !== k) {
+        mk.getElement().replaceChildren(...pinIcon(m).children);
+        mk.getPopup().setDOMContent(popupEl(m));
+        mk.getElement().setAttribute("aria-label", m.name);
+        mk._key = k;
+      }
+    }
+    stylePin(mk, m);
+    if (!quiet) scheduleFit();
+  }
+  function unplace(id) { const mk = markers.get(id); if (mk) { mk.remove(); markers.delete(id); } }
+  function fit() {
+    if (!map) return;
+    const pts = [];
+    markers.forEach((mk) => pts.push(mk.getLngLat()));
+    if (!pts.length) return;
+    const w = map.getContainer().clientWidth, h = map.getContainer().clientHeight;
+    if (!w || !h) { pendingFit = true; return; }
+    pendingFit = false;
+    map.resize();
+    const jump = !fitted;                   // the first fit lands at once, later ones glide
+    fitted = true;
+    if (pts.length === 1) { map.easeTo({center: pts[0], zoom: 14, animate: !jump}); return; }
+    const box = new maplibregl.LngLatBounds(pts[0], pts[0]);
+    pts.forEach((p) => box.extend(p));
+    const px = Math.min(w, h) * 0.17, side = Math.min(Math.max(px, 90), w * 0.3);   // room for the name pills and the chip
+    map.fitBounds(box, {padding: {top: px + 30, bottom: px + 30, left: side, right: side}, maxZoom: 16, animate: !jump});
+  }
+  $("fitBtn").onclick = () => { touched = false; fit(); };
+
+  // ---- cars ----
+  let listTimer = null;
+  let pressed = false;
+  function scheduleCars() {
+    if (listTimer) return;
+    listTimer = setTimeout(() => { listTimer = null; if (pressed) scheduleCars(); else renderCars(); }, 1000);
+  }
+  $("carlist").addEventListener("pointerdown", () => { pressed = true; });
+  document.addEventListener("pointerup", () => { pressed = false; });
+  document.addEventListener("pointercancel", () => { pressed = false; });
+  $("carlist").addEventListener("click", (e) => {
+    const r = e.target.closest(".car");
+    if (!r) return;
+    if (e.target.closest(".msgbtn")) openThread(r.dataset.id);
+    else if (!members.get(r.dataset.id) || members.get(r.dataset.id).role !== "watcher") locateCar(r.dataset.id);
+  });
+  function centre() {
+    const ps = [];
+    members.forEach((m) => { if (m.role !== "watcher" && m.online && m.pos) ps.push(m.pos); });
+    if (!ps.length) return null;
+    return {lat: ps.reduce((a, p) => a + p.lat, 0) / ps.length, lon: ps.reduce((a, p) => a + p.lon, 0) / ps.length, n: ps.length};
+  }
+  function carRow(m, mid) {
+    const live = m.online && m.pos;
+    const line = el("div", "cline" + (m.online ? " on" : ""));
+    if (m.role === "watcher") line.textContent = m.id === me ? "Watching, in this browser" : "Watching";
+    else if (m.online) line.textContent = m.pos ? "Online · position " + ago(m.pos.time) : "Online · no position yet";
+    else {
+      const seen = m.left || (m.pos && m.pos.time);
+      line.textContent = seen ? "Offline · last seen " + ago(seen) : "Offline";
+    }
+    const facts = el("div", "facts");
+    if (live && m.role !== "watcher") {
+      const kmh = Math.round(m.pos.speed * 3.6);
+      facts.append(el("span", "fact", [icon("speed"), kmh < 2 ? "Stopped" : kmh + " km/h"]));
+      if (kmh >= 2) {
+        const arrow = icon("arrow");
+        arrow.style.transform = "rotate(" + (m.pos.bearing || 0) + "deg)";
+        facts.append(el("span", "fact", [arrow, compass(m.pos.bearing || 0) + " " + Math.round(m.pos.bearing || 0) + "°"]));
+      }
+      if (mid && mid.n > 1) facts.append(el("span", "fact", [icon("dist"), fmtDist(distance(m.pos, mid)) + " from the centre"]));
+    }
+    const name = el("div", "cname", [el("b", "", [m.name])]);
+    if (m.id === me) name.append(el("span", "tag", ["you"]));
+    const av = el("span", "avw", [avatar(m, "lg"), el("span", "presence" + (m.online ? " on" : ""))]);
+    const locate = el("button", "loc", [icon("locate")]);
+    locate.type = "button";
+    locate.setAttribute("aria-label", "Show " + m.name + " on the map");
+    const row = el("li", "car" + (m.online ? "" : " off"), [av, el("div", "cinfo", [name, line, facts])]);
+    if (m.role !== "watcher") row.append(locate);
+    if (m.id !== me) {                      // a private thread with this car, or this watcher
+      const msg = el("button", "loc msgbtn", [icon("chat")]);
+      msg.type = "button";
+      msg.title = "Message " + m.name + " privately";
+      msg.setAttribute("aria-label", "Message " + m.name + " privately");
+      const t = threads.get(m.id);
+      if (t && t.unread) msg.append(el("span", "badge", [String(t.unread)]));
+      row.append(msg);
+    }
+    row.style.setProperty("--c", m.c);
+    row.dataset.id = m.id;
+    return row;
+  }
+  function renderCars() {
+    const mid = centre();
+    const cars = [], watchers = [];
+    members.forEach((m) => { (m.role === "watcher" ? watchers : cars).push(m); });
+    const byName = (a, b) => (b.online - a.online) || a.name.localeCompare(b.name);
+    cars.sort(byName);
+    const onlineCars = cars.filter((m) => m.online).length;
+    const liveWatchers = watchers.filter((m) => m.online);
+    document.querySelectorAll("[data-count]").forEach((c) => { c.textContent = onlineCars; });
+
+    let spread = 0;
+    if (mid && mid.n > 1) members.forEach((m) => { if (m.role !== "watcher" && m.online && m.pos) spread = Math.max(spread, distance(m.pos, mid)); });
+    const stat = (v, l) => el("div", "stat", [el("b", "", [String(v)]), el("span", "", [l])]);
+    const sum = $("summary");
+    sum.textContent = "";
+    sum.append(stat(onlineCars, onlineCars === 1 ? "car online" : "cars online"),
+               stat(mid && mid.n > 1 ? fmtDist(spread * 2) : "–", "spread"),
+               stat(liveWatchers.length, "watching"));
+    const info = $("mapinfo");
+    info.hidden = !cars.length;
+    info.textContent = "";
+    info.append(onlineCars + (onlineCars === 1 ? " car" : " cars"));
+    if (mid && mid.n > 1) info.append(el("span", "", [" · " + fmtDist(spread * 2) + " apart"]));
+
+    const list = $("carlist");
+    const top = list.scrollTop;
+    list.textContent = "";
+    if (!members.size) { list.append(el("div", "empty", [el("b", "", ["Nobody here yet"])])); return; }
+    if (cars.length) {
+      list.append(el("h3", "", ["Cars"]));
+      list.append(el("ul", "", cars.map((m) => carRow(m, mid))));
+    }
+    if (liveWatchers.length) {
+      list.append(el("h3", "", ["Watching"]));
+      list.append(el("ul", "", liveWatchers.map((m) => carRow(m, mid))));
+    }
+    list.scrollTop = top;
+    updateStatus();
+    if (cur) { noteFor(cur); setPlaceholder(); }
+  }
+  function locateCar(id) {
+    const mk = markers.get(id);
+    if (!mk || !map) { toast("No position from that car yet"); return; }
+    touched = true;
+    if (!wide.matches) setView("map");
+    map.easeTo({center: mk.getLngLat(), zoom: Math.max(map.getZoom(), 15)});
+  }
+
+  // ---- connection status ----
+  let joined = false, connectedOnce = false;
+  function setState(kind, text) {
+    $("status").className = "state " + kind;
+    $("statustext").textContent = text;
+  }
+  function updateStatus() {
+    if (!joined) return;
+    let cars = 0;
+    members.forEach((m) => { if (m.role !== "watcher" && m.online) cars++; });
+    setState("ok", "Connected · " + cars + (cars === 1 ? " car" : " cars") + " online");
+  }
+  let locked = false;
+
+  // ---- chat: the shared feed ("Everyone"), and a thread with each person you have private messages with ----
+  const wrap = $("msgwrap"), text = $("text");
+  const threads = new Map();              // "all", or a member's id -> {id, priv, name, box, items, lastDay, unread, newBelow, draft, seq, empty}
+  const byId = new Map(), byCid = new Map();
+  let cur = null, added = 0, seqN = 0;     // the order the conversations started in is the order of their chips
+  const outbox = [];                      // said here, not yet back from the server: {cid, text, to, since, item}
+  const MAX_WAIT = 14 * 60 * 1000;        // the server takes up to 15 min of waiting
+
+  const threadName = (t) => (t.priv ? (members.get(t.id) || {}).name || t.name || "Someone" : "Everyone");
+  function emptyNote(t) {
+    const who = threadName(t);
+    return t.priv
+      ? el("div", "empty", [icon("lock"), el("b", "", ["Nothing said to " + who + " yet"]), "Only you and " + who + " see what is said here, not the rest of the convoy."])
+      : el("div", "empty", [icon("chat"), el("b", "", ["No messages yet"]), "Say hello to the drivers. Their messages and voice notes show up here."]);
+  }
+  function thread(id, name) {
+    let t = threads.get(id);
+    if (t) { if (name && !t.name) t.name = name; return t; }
+    const box = el("div", "msgs" + (id === "all" ? "" : " priv"));
+    box.setAttribute("role", "log");
+    box.setAttribute("aria-live", "polite");
+    box.hidden = true;
+    t = {id: id, priv: id !== "all", name: name || "", box: box, items: [], lastDay: "", unread: 0, newBelow: 0, draft: "", seq: ++seqN, empty: null};
+    t.empty = emptyNote(t);
+    box.append(t.empty);
+    box.addEventListener("scroll", () => { if (t === cur && atBottom(t)) { hidePill(t); if (chatVisible()) clearUnread(); } });
+    wrap.insertBefore(box, $("pill"));
+    threads.set(id, t);
+    return t;
+  }
+  const atBottom = (t) => t.box.scrollHeight - t.box.scrollTop - t.box.clientHeight < 80;
+  function toBottom(smooth) { cur.box.scrollTo({top: cur.box.scrollHeight, behavior: smooth ? "smooth" : "auto"}); hidePill(cur); }
+  function hidePill(t) { t.newBelow = 0; if (t === cur) $("pill").hidden = true; }
+  $("pill").onclick = () => toBottom(true);
+
+  // the conversations along the top of the chat (only once there is more than the shared one); one is open at a time
+  function renderThreads() {
+    const bar = $("threads");
+    const list = [...threads.values()].sort((a, b) => (a.priv - b.priv) || (a.seq - b.seq));
+    bar.hidden = list.length < 2;
+    bar.textContent = "";
+    list.forEach((t) => {
+      const chip = el("button", "chip" + (t.priv ? "" : " all"), [
+        t.priv ? avatar(who(t.id, t.name), "xs") : null, el("span", "nm", [threadName(t)]),
+        t.unread ? el("span", "badge", [t.unread > 99 ? "99+" : String(t.unread)]) : null]);
+      chip.type = "button";
+      chip.setAttribute("role", "tab");
+      chip.setAttribute("aria-selected", t === cur ? "true" : "false");
+      chip.dataset.t = t.id;
+      bar.append(chip);
+    });
+  }
+  $("threads").addEventListener("click", (e) => { const c = e.target.closest(".chip"); if (c) select(c.dataset.t); });
+  function noteFor(t) {                    // under the chips in a private thread: who it is with
+    const n = $("privnote");
+    n.hidden = !t.priv;
+    if (!t.priv) return;
+    const m = members.get(t.id);
+    $("privnotetext").textContent = "Private: only you and " + threadName(t) + " see these" + (m && !m.online ? " · offline now" : "");
+  }
+  function setPlaceholder() {
+    const base = cur && cur.priv ? "Message " + threadName(cur) + " privately…" : "Message the drivers";
+    text.placeholder = joined ? base : text.disabled ? base : "Offline: it sends when the connection is back";
+    $("textlabel").textContent = base;
+  }
+  // opens a conversation (empty private ones that are left again are dropped)
+  function select(id) {
+    const t = thread(id);
+    const was = cur;
+    if (was && was !== t) {
+      was.draft = text.value;
+      was.box.hidden = true;
+      if (was.priv && !was.items.length) { was.box.remove(); threads.delete(was.id); }
+    }
+    cur = t;
+    t.box.hidden = false;
+    if (was !== t) { text.value = t.draft; grow(); }
+    $("pilltext").textContent = t.newBelow === 1 ? "1 new message" : t.newBelow + " new messages";
+    $("pill").hidden = !t.newBelow;
+    noteFor(t);
+    setPlaceholder();
+    if (chatVisible()) clearUnread();
+    renderThreads();
+    toBottom();
+    const sel = $("threads").querySelector('[aria-selected="true"]');
+    if (sel && sel.scrollIntoView) sel.scrollIntoView({block: "nearest", inline: "nearest"});
+  }
+  // a private conversation with this member, started or reopened: from the cars list or a car on the map
+  function openThread(id) {
+    if (id === me) return;
+    const m = members.get(id);
+    thread(id, m && m.name);
+    select(id);
+    setView("chat");
+    if (!text.disabled) text.focus();
+  }
+
+  function showUnread() {
+    let n = 0;
+    threads.forEach((t) => { n += t.unread; });
+    document.querySelectorAll("[data-unread]").forEach((b) => { b.hidden = !n; b.textContent = n > 99 ? "99+" : n; });
+    document.title = (n ? "(" + n + ") " : "") + baseTitle;
+  }
+  function clearUnread() { if (cur && cur.unread) { cur.unread = 0; showUnread(); renderThreads(); } }
+  let baseTitle = "Convoy";
+
+  const URL_RE = /https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/g;
+  function textNode(s) {
+    const t = el("div", "text");
+    let last = 0, m;
+    URL_RE.lastIndex = 0;
+    while ((m = URL_RE.exec(s))) {
+      t.append(s.slice(last, m.index));
+      const a = el("a", "", [m[0]]);
+      a.href = m[0];
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      t.append(a);
+      last = m.index + m[0].length;
+    }
+    t.append(s.slice(last));
+    return t;
+  }
+
+  // a voice note: play/pause, a bar to seek by, and how long it is; the sound is fetched when first played
+  const queue = [];
+  let current = null, blocked = false;
+  function makeVoice(m) {
+    const play = el("button", "play", [icon("play", "i-play"), icon("pause", "i-pause")]);
+    play.type = "button";
+    play.setAttribute("aria-label", "Play the voice note from " + m.name);
+    const range = el("input");
+    range.type = "range";
+    range.min = 0; range.max = 1000; range.value = 0; range.step = 1;
+    range.setAttribute("aria-label", "Position in the voice note");
+    const dur = el("div", "dur", [fmtDur(m.ms / 1000)]);
+    const node = el("div", "voice", [play, el("div", "mid", [range, dur])]);
+    const p = {m: m, node: node, audio: null, seekTo: null, gone: false};
+    const total = () => (p.audio && isFinite(p.audio.duration) && p.audio.duration > 0 ? p.audio.duration : m.ms / 1000);
+    p.paint = () => {
+      const t = p.audio ? p.audio.currentTime : 0, d = total();
+      const frac = d ? Math.min(1, t / d) : 0;
+      range.value = Math.round(frac * 1000);
+      range.style.setProperty("--p", (frac * 100) + "%");
+      dur.textContent = p.gone ? "No longer available" : t > 0.05 ? fmtDur(t) + " / " + fmtDur(d) : fmtDur(d);
+      const on = p.audio && !p.audio.paused && !p.audio.ended;
+      node.classList.toggle("playing", !!on);
+      play.setAttribute("aria-label", (on ? "Pause" : "Play") + " the voice note from " + m.name);
+    };
+    p.ensure = () => {
+      if (p.audio) return p.audio;
+      const a = new Audio();
+      a.preload = "none";
+      a.src = m.path;
+      a.addEventListener("timeupdate", p.paint);
+      a.addEventListener("loadedmetadata", () => {
+        if (p.seekTo != null) { a.currentTime = p.seekTo * a.duration; p.seekTo = null; }
+        p.paint();
+      });
+      a.addEventListener("play", () => { p.paint(); npUpdate(); });
+      a.addEventListener("pause", () => { p.paint(); npUpdate(); });
+      a.addEventListener("ended", () => { a.currentTime = 0; p.paint(); npUpdate(); playNext(); });
+      a.addEventListener("error", () => { p.gone = true; node.classList.add("gone"); p.paint(); npUpdate(); playNext(); });
+      p.audio = a;
+      return a;
+    };
+    p.start = () => {                      // returns the play() promise
+      const a = p.ensure();
+      if (current && current !== p && current.audio && !current.audio.paused) current.audio.pause();
+      current = p;
+      return a.play();
+    };
+    p.toggle = () => {
+      if (p.gone) return;
+      const a = p.ensure();
+      blocked = false;
+      if (!a.paused) { a.pause(); return; }
+      const i = queue.indexOf(p);
+      if (i >= 0) queue.splice(i, 1);
+      const r = p.start();
+      if (r && r.catch) r.catch(() => {});
+      npUpdate();
+    };
+    play.onclick = p.toggle;
+    range.oninput = () => {
+      const frac = range.value / 1000;
+      range.style.setProperty("--p", (frac * 100) + "%");
+      const a = p.ensure();
+      if (a.readyState >= 1 && isFinite(a.duration)) a.currentTime = frac * a.duration;
+      else { p.seekTo = frac; a.preload = "metadata"; a.load(); }
+    };
+    p.paint();
+    return p;
+  }
+
+  // new voice notes play one after another (browsers wait for a click or tap on the page first)
+  function playNext() {
+    if (current && current.audio && !current.audio.paused) return;
+    while (queue.length) {
+      const p = queue.shift();
+      if (p.gone) continue;
+      const r = p.start();
+      if (r && r.catch) {
+        r.catch((err) => {
+          if (err && err.name === "AbortError") return;      // paused by someone playing another
+          if (err && err.name === "NotAllowedError") { queue.unshift(p); blocked = true; }
+          else { p.gone = true; p.paint(); playNext(); }
+          npUpdate();
+        });
+      }
+      npUpdate();
+      return;
+    }
+    npUpdate();
+  }
+  let unblockedAt = 0;
+  function unblock() { if (blocked) { blocked = false; unblockedAt = Date.now(); playNext(); } }
+  document.addEventListener("pointerdown", unblock, true);
+  document.addEventListener("keydown", unblock, true);
+
+  function npUpdate() {
+    const playing = current && current.audio && !current.audio.paused && !current.audio.ended ? current : null;
+    const np = $("np"), what = $("npwhat");
+    np.hidden = !(playing || queue.length);
+    np.classList.toggle("live", !!playing);
+    if (np.hidden) return;
+    what.textContent = "";
+    if (blocked) what.append("Tap to hear the voice notes", el("span", "", [" · " + queue.length + " waiting"]));
+    else if (playing) {
+      what.append(playing.m.name + (playing.m.to ? " (private)" : ""));
+      if (queue.length) what.append(el("span", "", [" · " + queue.length + " more"]));
+    } else what.append("Voice notes waiting", el("span", "", [" · " + queue.length]));
+    $("npskip").textContent = blocked ? "Play" : "Skip";
+  }
+  $("npskip").onclick = () => {
+    if (Date.now() - unblockedAt < 800) return;      // this very tap started the queue
+    if (current && current.audio && !current.audio.paused) { current.audio.pause(); current.audio.currentTime = 0; current.paint(); }
+    else queue.shift();
+    playNext();
+    npUpdate();
+  };
+  $("autoplay").checked = get("autoplay") !== "0";
+  $("autoplay").onchange = () => {
+    put("autoplay", $("autoplay").checked ? "1" : "0");
+    if (!$("autoplay").checked) { queue.length = 0; npUpdate(); }
+  };
+
+  function buildRow(item) {
+    const m = item.m, mine = m.from === me;
+    const priv = item.thread.priv;
+    const row = el("div", "row " + (mine ? "mine" : "other") + (item.cont ? " cont" : "") + (item.more ? " more" : "") +
+                   (item.pending ? " pending" : "") + (item.failed ? " failed" : "") + (priv ? " priv" : ""));
+    const mem = who(m.from, m.name);
+    if (!mine) {
+      const slot = el("div", "slot");
+      if (!item.cont) slot.append(avatar(mem, "sm"));
+      row.append(slot);
+    }
+    row.style.setProperty("--c", mem.c);
+    const col = el("div", "col");
+    if (!mine && !item.cont && !priv) col.append(el("div", "who", [m.name || mem.name]));
+    const bubble = el("div", "bubble");
+    if (m.t === "voice") {
+      if (!item.player) item.player = makeVoice(m);
+      bubble.append(item.player.node);
+    } else bubble.append(textNode(m.text || ""));
+    const foot = el("div", "foot");
+    if (m.late) foot.append(el("span", "tag late", [icon("clock"), "sent late · waited " + waited(m.late)]));
+    if (item.leaked) foot.append(el("span", "tag late", ["went to everyone: this relay has no private messages"]));
+    else if (mine && priv && !item.pending && !item.failed && !m.to_name) foot.append(el("span", "tag late", ["nobody has that id"]));
+    if (priv) foot.append(icon("lock", "lockm"));
+    if (item.failed) foot.append("Not sent · tap to retry");
+    else if (item.pending) foot.append(icon("clock"), "Sending…");
+    else foot.append(el("time", "", [fmtTime(m.time)]));
+    bubble.append(foot);
+    col.append(bubble);
+    row.append(col);
+    if (item.failed) row.onclick = () => retry(item);
+    return row;
+  }
+  function rerender(item) {
+    const old = item.el;
+    item.el = buildRow(item);
+    if (old && old.parentNode) old.replaceWith(item.el);
+  }
+
+  // the conversation a message belongs to (null: private, and not between this browser and anyone)
+  function threadOf(m) {
+    if (!m.to) return thread("all");
+    if (m.from === me) return thread(m.to, m.to_name);
+    return m.to === me ? thread(m.from, m.name) : null;
+  }
+  // adds one message (history, live, or one said here and still on its way); returns its item
+  function addMessage(m, how) {
+    how = how || {};
+    const known = m.id && byId.get(m.id);
+    if (known) return known;
+    const mine = m.from === me;
+    const pend = mine && m.cid ? byCid.get(m.cid) : null;
+    if (pend) {                             // the server's copy of one said here
+      pend.leaked = !!pend.m.to && !m.to;   // a relay that does not know "to" shared it with everyone
+      pend.m = m;
+      pend.pending = pend.failed = false;
+      const o = outbox.findIndex((x) => x.cid === m.cid);
+      if (o >= 0) outbox.splice(o, 1);
+      byCid.delete(m.cid);
+      byId.set(m.id, pend);
+      rerender(pend);
+      return pend;
+    }
+    const t = threadOf(m);
+    if (!t) return null;
+    const stick = atBottom(t);
+    const prev = t.items[t.items.length - 1];
+    if (t.empty) { t.empty.remove(); t.empty = null; }
+    const k = dayKey(m.time);
+    if (k !== t.lastDay) { t.box.append(el("div", "day", [dayLabel(m.time)])); t.lastDay = k; }
+    const item = {m: m, thread: t, pending: !!how.pending, failed: false, cont: false, more: false};
+    if (prev && k === dayKey(prev.m.time) && prev.m.from === m.from && !prev.failed && Math.abs(m.time - prev.m.time) < 5 * 60000 &&
+        t.box.lastChild === prev.el) {
+      item.cont = true;
+      if (!prev.more) { prev.more = true; prev.el.classList.add("more"); }
+    }
+    item.el = buildRow(item);
+    t.box.append(item.el);
+    t.items.push(item);
+    added++;
+    if (m.id) byId.set(m.id, item);
+    if (how.pending) byCid.set(m.cid, item);
+    if (how.fresh) {
+      const shown = t === cur;
+      if (shown) {
+        if (mine || stick) toBottom();
+        else { t.newBelow++; $("pilltext").textContent = t.newBelow === 1 ? "1 new message" : t.newBelow + " new messages"; $("pill").hidden = false; }
+      }
+      if (!mine && !(shown && chatVisible())) { t.unread++; showUnread(); announce(m, t); }
+      if (m.t === "voice" && !mine && !how.quiet && $("autoplay").checked) {
+        queue.push(item.player);
+        playNext();
+      }
+      renderThreads();
+    }
+    return item;
+  }
+  function announce(m, t) {
+    if (document.hidden) return;
+    toast((m.name || "?") + (m.to ? " → you" : "") + ": " + (m.t === "voice" ? "voice note" : m.text), () => { select(t.id); setView("chat"); });
+  }
+
+  // what is said here waits in the outbox until the server sends it back, and goes again after a reconnect
+  function send(body, to) {
+    const cid = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+    const o = {cid: cid, text: body, to: to || "", since: Date.now(), item: null};
+    outbox.push(o);
+    const m = {t: "msg", from: me, name: myName, text: body, time: Date.now(), cid: cid};
+    if (to) { m.to = to; m.to_name = (members.get(to) || {}).name || (cur && cur.name) || ""; }
+    o.item = addMessage(m, {fresh: true, pending: true});
+    flush();
+  }
+  function flush() {
+    if (!(ws && ws.readyState === 1 && joined)) return;
+    outbox.slice().forEach((o) => {
+      const age = Date.now() - o.since;
+      if (age > MAX_WAIT) {                // given up: it can be sent again by tapping it
+        o.item.failed = true;
+        o.item.pending = false;
+        rerender(o.item);
+        byCid.delete(o.cid);
+        outbox.splice(outbox.indexOf(o), 1);
+        failedList.push(o);
+        return;
+      }
+      const out = {t: "msg", text: o.text, cid: o.cid, age: age};
+      if (o.to) out.to = o.to;
+      ws.send(JSON.stringify(out));
+    });
+  }
+  const failedList = [];
+  function retry(item) {
+    const i = failedList.findIndex((o) => o.item === item);
+    if (i < 0) return;
+    const o = failedList.splice(i, 1)[0];
+    o.since = Date.now();
+    item.failed = false;
+    item.pending = true;
+    byCid.set(o.cid, item);
+    outbox.push(o);
+    rerender(item);
+    flush();
+  }
+
+  // the composer grows with what is typed
+  function grow() {
+    text.style.height = "auto";
+    text.style.height = Math.min(120, text.scrollHeight) + "px";
+    text.style.overflowY = text.scrollHeight > 120 ? "auto" : "hidden";
+  }
+  text.addEventListener("input", grow);
+  text.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("send").requestSubmit(); }
+  });
+  $("send").onsubmit = (e) => {
+    e.preventDefault();
+    const t = text.value.trim();
+    if (!t || text.disabled) return;
+    send(t, cur.priv ? cur.id : "");
+    text.value = "";
+    grow();
+  };
+  function ready(on) {
+    text.disabled = !on;
+    $("go").disabled = !on;
+    setPlaceholder();
+  }
+
+  // ---- the connection ----
+  let ws = null, wait = 1000, stop = false, timer = null, pinger = null;
+  function connect() {
+    clearTimeout(timer);
+    // ?c= lets the relay take the socket straight to its convoy
+    const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws?c=" + encodeURIComponent(token);
+    const sock = new WebSocket(url);
+    ws = sock;
+    sock.onopen = () => {
+      wait = 1000;
+      // this page sends nothing else while it only watches: a ping keeps it known to be here
+      clearInterval(pinger);
+      pinger = setInterval(() => { if (sock.readyState === WebSocket.OPEN) sock.send('{"t":"ping"}'); }, 20000);
+      sock.send(JSON.stringify({t: "hello", token: token, password: pw(), member: me, name: myName, role: "watcher"}));
+    };
+    sock.onmessage = (e) => {
+      if (sock !== ws) return;
+      let d;
+      try { d = JSON.parse(e.data); } catch (err) { return; }
+      handle(d);
+    };
+    sock.onclose = () => {
+      if (sock !== ws) return;
+      clearInterval(pinger);
+      joined = false;
+      ready(connectedOnce && !stop);
+      if (stop) return;
+      $("banner").hidden = false;
+      setState("warn", connectedOnce ? "Reconnecting…" : "Connecting…");
+      timer = setTimeout(connect, wait);
+      wait = Math.min(wait * 2, 30000);
+    };
+  }
+
+  function norm(m) {
+    const o = Object.assign({}, m);
+    o.name = String(o.name || "Car");
+    return o;
+  }
+  function refreshMap() {
+    markers.forEach((mk, id) => { const m = members.get(id); if (!m || !m.pos) unplace(id); });
+    members.forEach((m) => place(m, true));
+    scheduleFit();
+  }
+
+  function handle(d) {
+    if (d.t === "welcome") {
+      const first = !connectedOnce;
+      connectedOnce = joined = true;
+      locked = !!d.locked;
+      members.clear();
+      d.members.forEach((m) => { const n = norm(m); members.set(n.id, n); });
+      assignColours();
+      refreshMap();
+      const again = added > 0;               // back after a drop: what was missed counts as new, but is not played
+      d.messages.forEach((m) => addMessage(m, {fresh: again, quiet: true}));
+      npUpdate();
+      renderThreads();
+      if (first) toBottom();
+      baseTitle = d.name + " · Convoy";
+      document.title = baseTitle;
+      showUnread();
+      $("title").textContent = d.name;
+      $("banner").hidden = true;
+      $("gate").hidden = true;
+      $("shareBtn").hidden = false;
+      $("lockmark").hidden = !locked;
+      $("link").value = d.link;
+      $("qr").src = location.pathname.replace(/\/$/, "") + "/qr.svg";
+      $("sharenote").textContent = "Scan the code with the car's phone (Convoy, Scan to join), or send the link." +
+        (d.locked ? " They also need the password." : "");
+      $("endbox").hidden = !key();
+      if (location.hash === "#share") { openModal("share"); history_replace(); }
+      ready(true);
+      renderCars();
+      flush();
+    } else if (d.t === "member") {
+      const n = norm(d.member), was = members.get(n.id);
+      if (was) n.left = was.left;
+      members.set(n.id, n);
+      assignColours();
+      place(n);
+      renderThreads();
+      scheduleCars();
+    } else if (d.t === "pos") {
+      const m = members.get(d.member);
+      if (m) {
+        m.pos = {lat: d.lat, lon: d.lon, speed: d.speed, bearing: d.bearing, time: d.time};
+        m.online = true;
+        place(m);
+        scheduleCars();
+      }
+    } else if (d.t === "left") {
+      const m = members.get(d.member);
+      if (m) { m.online = false; m.left = Date.now(); place(m); scheduleCars(); }
+    } else if (d.t === "msg" || d.t === "voice") {
+      addMessage(d, {fresh: true});
+    } else if (d.t === "ack") {
+      const o = outbox.findIndex((x) => x.cid === d.cid);
+      if (o >= 0) {                        // the server had it already (its echo is in the history or was missed)
+        const it = outbox[o].item;
+        outbox.splice(o, 1);
+        it.pending = false;
+        rerender(it);
+      }
+    } else if (d.t === "ended") {
+      stop = true;
+      joined = false;
+      ready(false);
+      endedScreen("This convoy has ended", d.error);
+    } else if (d.t === "error") {
+      if (d.code === "password") {
+        stop = true;
+        $("pwerror").textContent = pw() ? d.error : "";
+        $("pwgo").disabled = false;
+        $("pwgo").textContent = "Join";
+        $("gate").hidden = false;
+        $("pw").focus();
+        $("pw").select();
+        setState("bad", "Needs the convoy's password");
+      } else if (d.code === "ended" || d.code === "bad") {
+        stop = true;
+        endedScreen(d.code === "ended" ? "This convoy has ended" : "That is not a convoy link", d.error);
+      } else {
+        setState("bad", d.error);
+        wait = 60000;
+      }
+    }
+  }
+  function history_replace() { try { window.history.replaceState(null, "", location.pathname); } catch (e) {} }
+  function endedScreen(title, why) {
+    $("endedtitle").textContent = title;
+    $("endedtext").textContent = why || "";
+    $("share").hidden = $("settings").hidden = $("gate").hidden = true;
+    $("shareBtn").hidden = true;
+    $("banner").hidden = true;
+    $("ended").hidden = false;
+    setState("bad", "Ended");
+  }
+
+  // ---- sheets ----
+  let opener = null;
+  function openModal(id) {
+    opener = document.activeElement;
+    $(id).hidden = false;
+    const f = $(id).querySelector("input:not([readonly])");
+    if (f) { f.focus(); }
+  }
+  function closeModal(id) {
+    $(id).hidden = true;
+    if (opener && opener.focus) opener.focus();
+    opener = null;
+  }
+  document.querySelectorAll(".modal").forEach((m) => {
+    m.addEventListener("mousedown", (e) => { if (e.target === m && (m.id === "share" || m.id === "settings")) closeModal(m.id); });
+  });
+  document.querySelectorAll("[data-close]").forEach((b) => { b.onclick = () => closeModal(b.dataset.close); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { ["share", "settings"].forEach((id) => { if (!$(id).hidden) closeModal(id); }); }
+  });
+
+  $("pwform").onsubmit = (e) => {
+    e.preventDefault();
+    setPw($("pw").value);
+    stop = false;
+    $("pwgo").disabled = true;
+    $("pwgo").textContent = "Joining…";
+    $("pwerror").textContent = "";
+    setState("warn", "Joining…");
+    connect();
+  };
+  $("shareBtn").onclick = () => openModal("share");
+  $("close").onclick = () => closeModal("share");
+  if (navigator.share) {
+    $("nativeShare").hidden = false;
+    $("nativeShare").onclick = () => { navigator.share({title: $("title").textContent, url: $("link").value}).catch(() => {}); };
+  }
+  $("copy").onclick = () => {
+    $("link").select();
+    const done = () => { $("copy").textContent = "Copied"; setTimeout(() => { $("copy").textContent = "Copy"; }, 2000); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText($("link").value).then(done, () => { document.execCommand("copy"); done(); });
+    else { try { document.execCommand("copy"); } catch (e) {} done(); }
+  };
+  let confirmEnd = false;
+  $("end").onclick = () => {
+    if (!confirmEnd) {
+      confirmEnd = true;
+      $("end").textContent = "Tap again: everyone is taken out";
+      setTimeout(() => { confirmEnd = false; $("end").textContent = "End the convoy for everyone"; }, 6000);
+      return;
+    }
+    fetch(location.pathname.replace("/c/", "/api/convoys/").replace(/\/$/, "") + "/end", {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({key: key()})})
+      .then((r) => r.json())
+      .then((d) => { if (d.error) { confirmEnd = false; $("end").textContent = d.error; } });
+  };
+  $("setBtn").onclick = () => { $("me").value = myName; openModal("settings"); };
+  $("setform").onsubmit = (e) => {
+    e.preventDefault();
+    const n = ($("me").value.trim() || "Watching").slice(0, 40);
+    closeModal("settings");
+    if (n === myName) return;
+    myName = n;
+    put("name", myName);
+    if (ws) ws.close();                    // reconnects with the new name
+  };
+
+  let toastTimer = null;
+  function toast(t, click) {
+    const e = $("toast");
+    e.textContent = t;
+    e.hidden = false;
+    e.onclick = () => { e.hidden = true; if (click) click(); };
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { e.hidden = true; }, 4000);
+  }
+
+  document.addEventListener("visibilitychange", () => { if (chatVisible()) { clearUnread(); } });
+  window.addEventListener("hashchange", () => {
+    if (location.hash === "#share" && !$("shareBtn").hidden) { openModal("share"); history_replace(); }
+  });
+  setInterval(() => {                      // "5 min ago" moves on; a long-waiting message gives up
+    if (mapVisible() || view === "cars") renderCars();
+    if (outbox.length) flush();
+  }, 15000);
+
+  select("all");
+  setView(view);
+  ready(false);
+  connect();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+__pycache__/
+.venv/
+lan/data/
+node_modules/
+.wrangler/
+.dev.vars
+.DS_Store

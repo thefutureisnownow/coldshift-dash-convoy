@@ -1,0 +1,32 @@
+# Every push: the Worker under `wrangler dev`, checked against PROTOCOL.md by the conformance suite.
+name: check
+on: [push, pull_request]
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: pip install -r tests/requirements.txt
+      - name: Start the Worker locally
+        run: |
+          printf 'START_KEY=ci-start-key\nSTARTS_PER_HOUR=1000\n' > .dev.vars
+          npx wrangler dev --port 8787 --ip 127.0.0.1 > wrangler.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8787/health && exit 0; sleep 1; done
+          cat wrangler.log; exit 1
+        env:
+          WRANGLER_SEND_METRICS: "false"
+      - name: Conformance
+        run: python -m unittest discover -s tests/conformance -v
+        env:
+          CONVOY_URL: http://127.0.0.1:8787
+          CONVOY_START_KEY: ci-start-key
+      - if: failure()
+        run: cat wrangler.log

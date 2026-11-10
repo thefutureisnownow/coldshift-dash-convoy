@@ -1,0 +1,37 @@
+{
+  "name": "coldshift-dash-convoy",
+  "private": true,
+  "description": "The Convoy relay on Cloudflare Workers: cars driving together see each other on the map and send each other messages",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "python3 -m unittest discover -s tests/conformance"
+  },
+  "devDependencies": {
+    "wrangler": "^4.158.0"
+  },
+  "dependencies": {
+    "uqr": "^0.1.3"
+  },
+  "cloudflare": {
+    "bindings": {
+      "START_KEY": {
+        "description": "Required: a secret only you and the apps you approve know. Starting a convoy needs it (none set: no convoy can be started); joining one needs only its link and password. Use a long random one, e.g. from `openssl rand -base64 24`."
+      },
+      "PUBLIC_URL": {
+        "description": "Leave empty: links and QR codes use the address your copy is reached at."
+      },
+      "STARTS_PER_HOUR": {
+        "description": "How many convoys one address may start in an hour."
+      },
+      "IDLE_HOURS": {
+        "description": "A convoy with nobody in it ends after this many hours, its messages and voice notes with it."
+      },
+      "ADMIN_KEY": {
+        "description": "Optional, and yours alone (never give it to the apps): it lets you list the convoys on your relay and end one, with tools/convoys.py. None set: nobody can."
+      }
+    }
+  }
+}

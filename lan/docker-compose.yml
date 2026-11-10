@@ -1,0 +1,23 @@
+# On a laptop, for a meet or a track day (see docs/lan.md):
+#   docker compose -f lan/docker-compose.yml up --build
+# or, without building, the published image:
+#   docker run -p 8080:8080 -p 47660:47660/udp -e DISCOVERY_URL=http://<this computer's address>:8080 \
+#     -v convoy-data:/data ghcr.io/thefutureisnownow/coldshift-dash-convoy
+services:
+  convoy:
+    build:
+      context: ..
+      dockerfile: lan/Dockerfile
+    ports:
+      - "8080:8080"
+      - "47660:47660/udp"            # discovery: phones on this network find the relay by themselves
+    environment:
+      # the container cannot see this computer's address: give it, for discovery replies (or DISCOVERY=0)
+      - DISCOVERY_URL=${DISCOVERY_URL:-}
+      - START_KEY=${START_KEY:-}      # set it to keep others on the network from starting convoys here
+      - PUBLIC_URL=${PUBLIC_URL:-}
+    volumes:
+      - convoy-data:/data
+    restart: unless-stopped
+volumes:
+  convoy-data:

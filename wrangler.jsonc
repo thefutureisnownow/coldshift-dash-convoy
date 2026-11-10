@@ -1,0 +1,40 @@
+// The Convoy relay on Cloudflare Workers (see docs/cloudflare.md).
+//   npx wrangler dev                                        a local copy at http://127.0.0.1:8787
+//   npx wrangler deploy                                     your copy at <name>.<you>.workers.dev
+//   npx wrangler deploy --domain convoy.example.com         ... on a domain of yours (on Cloudflare)
+//   npx wrangler secret put START_KEY                       needed: without it no convoy can be started
+//   npx wrangler secret put ADMIN_KEY                       yours alone: list the convoys and end one (tools/convoys.py)
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "coldshift-dash-convoy",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-01",
+  // the pages (shared with the LAN relay); every request goes through the Worker, which serves them
+  "assets": {
+    "directory": "site",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  // a Convoy object for each convoy (its members, messages and voice notes), a Limits object for each address
+  "durable_objects": {
+    "bindings": [
+      { "name": "CONVOY", "class_name": "Convoy" },
+      { "name": "LIMITS", "class_name": "Limits" },
+      { "name": "REGISTRY", "class_name": "Registry" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["Convoy", "Limits"] },
+    { "tag": "v2", "new_sqlite_classes": ["Registry"] }
+  ],
+  "vars": {
+    // the address in links and QR codes; empty: the address the request came to
+    "PUBLIC_URL": "",
+    // convoys one address may start in an hour
+    "STARTS_PER_HOUR": "60",
+    // a convoy nobody is in ends after this many hours (its messages and voice notes with it)
+    "IDLE_HOURS": "12"
+  }
+}

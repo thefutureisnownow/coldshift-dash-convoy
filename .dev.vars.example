@@ -1,0 +1,7 @@
+# Only those who know the start key may start convoys on your copy; with none set, nobody can (anyone with a convoy's link and password
+# may still join it). Use a long random one, e.g. from: openssl rand -base64 24
+START_KEY=
+
+# Yours alone (not the apps'): it lets tools/convoys.py list the convoys on your relay and end one. With none set,
+# nobody can. Another long random one: openssl rand -base64 24
+ADMIN_KEY=

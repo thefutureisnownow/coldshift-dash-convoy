@@ -1,0 +1,7 @@
+.git
+**/.venv
+**/__pycache__
+lan/data
+worker
+node_modules
+.wrangler
